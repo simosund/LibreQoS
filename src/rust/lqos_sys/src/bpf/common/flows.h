@@ -257,6 +257,10 @@ static __always_inline void detect_retries(
     data->last_ack[rate_index] = ack_seq;
 }
 
+volatile __u64 n_tsval_changes = 0;
+volatile __u64 n_tsecr_changes = 0;
+volatile __u64 n_rtts = 0;
+volatile __u64 n_reported_rtts = 0;
 
 // Passively infer TCP RTT by matching ACKs to previous TCP segments using TCP
 // timestamps (TSval/TSecr).
@@ -279,6 +283,8 @@ static __always_inline void infer_tcp_rtt(
     // This part is a bit odd - TSval and TSecr may be updated independently, so no need to couple them
     // Should also check that they advance (rather than just not being the same)
     if (dissector->tsval != data->tsval[rate_index] && dissector->tsecr != data->tsecr[rate_index]) {
+        n_tsval_changes++;
+        n_tsecr_changes++;
 
         // Match check + non-zero throughput in the last second - sensible
         if (
@@ -288,8 +294,14 @@ static __always_inline void infer_tcp_rtt(
         ) {
             // This becomes a bit strange as change_time is time of changing both TSval and TSecr
             __u64 elapsed = dissector->now - data->ts_change_time[other_rate_index];
+            n_rtts++;
+            // Sanity checks - in my netem setup external/internet segment has 42ms latency and local segment has 9ms
+            if ((rate_index == 0 && elapsed < 40000000) || (rate_index == 1 && elapsed < 8000000))
+                bpf_printk("RTT too low! dir=%u, tsecr/matched tsval=%u, rtt=%llu",
+                           rate_index, dissector->tsecr, elapsed);
 
             if (elapsed < TWO_SECONDS_IN_NANOS) {
+                n_reported_rtts++;
                 struct flowbee_event event = { 0 };
                 event.key = *key;
                 event.round_trip_time = elapsed;

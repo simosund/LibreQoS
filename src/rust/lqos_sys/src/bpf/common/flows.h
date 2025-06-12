@@ -286,12 +286,8 @@ static __always_inline void infer_tcp_rtt(
         n_tsval_changes++;
         n_tsecr_changes++;
 
-        // Match check + non-zero throughput in the last second - sensible
-        if (
-            dissector->tsecr == data->tsval[other_rate_index] &&
-            (data->rate_estimate_bps[rate_index] > 0 ||
-             data->rate_estimate_bps[other_rate_index] > 0 )
-        ) {
+        // Match check
+        if (dissector->tsecr == data->tsval[other_rate_index]) {
             // This becomes a bit strange as change_time is time of changing both TSval and TSecr
             __u64 elapsed = dissector->now - data->ts_change_time[other_rate_index];
             n_rtts++;

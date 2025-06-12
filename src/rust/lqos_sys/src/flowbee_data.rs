@@ -56,7 +56,7 @@ pub struct FlowbeeData {
     /// Timestamp echo values
     pub tsecr: DownUpOrder<u32>,
     /// When did the timestamp change?
-    pub ts_change_time: DownUpOrder<u64>,
+    pub tsval_tstamps: DownUpOrder<[u64; 4]>,
     /// Has the connection ended?
     /// 0 = Alive, 1 = FIN, 2 = RST
     pub end_status: u8,
@@ -65,5 +65,5 @@ pub struct FlowbeeData {
     /// Raw TCP flags
     pub flags: u8,
     /// Padding.
-    pub padding: u8,
+    pub padding: [u8; 5],
 }

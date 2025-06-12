@@ -278,6 +278,7 @@ static __always_inline void detect_retries(
 
 volatile __u64 n_tsval_changes = 0;
 volatile __u64 n_tsecr_changes = 0;
+volatile __u64 n_tracked_tsval = 0;
 volatile __u64 n_rtts = 0;
 volatile __u64 n_reported_rtts = 0;
 
@@ -298,6 +299,7 @@ static __always_inline int record_tsval(
         ) {
             buf->timestamps[i] = time;
             buf->tsvals[i] = tsval;
+            n_tracked_tsval++;
             return 0;
         }
     }

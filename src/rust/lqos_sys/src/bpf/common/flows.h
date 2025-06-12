@@ -39,15 +39,13 @@ struct flow_key_t {
     __u8 pad2;
 };
 
-struct tsval_timestamp_record_t {
-    // When we saw this TSval (0 indicates unset)
-    __u64 timestamp;
-    // TSval we saw (only valid if timestamp > 0)
-    __u64 tsval; // Only u32 needed, but that leaves 4 bytes padding, so might as well use u64
-};
-
 struct tsval_record_buffer_t {
-    struct tsval_timestamp_record_t records[2];
+    // Times when TSvals were observed
+    // If an entry is 0 is means the spot is free
+    __u64 timestamps[2];
+    // The corresponding TSvals that were observed
+    // tsval[i] is only valid if timestamp[i] > 0
+    __u32 tsvals[2];
 };
 
 // TCP connection flow entry
@@ -74,6 +72,11 @@ struct flow_data_t {
     __u32 last_ack[2];
     // Retransmit Counters (Also catches duplicates and out-of-order packets)
     __u16 tcp_retransmits[2];
+    // Padding to avoid 4 byte hole and push TSval/TSecr data to its own cacheline
+    // Would probably be better to increase the tcp_retransmit counters to u32
+    // instead, but that requires additional changes to all the user-space Rust
+    // code that use them.
+    __u32 pad1;
     // Timestamp values
     __u32 tsval[2];
     __u32 tsecr[2];
@@ -87,7 +90,7 @@ struct flow_data_t {
     // IP Flags
     __u8 ip_flags;
     // Padding
-    __u8 pad[5];
+    __u8 pad2[5];
 };
 
 // Map for tracking TCP flow progress.
@@ -288,14 +291,14 @@ static __always_inline int record_tsval(
 ) {
     int i;
 
-    for (i = 0; i < ARRAY_SIZE(buf->records); i++) {
+    for (i = 0; i < ARRAY_SIZE(buf->timestamps); i++) {
         if (
-            buf->records[i].timestamp == 0 || // This spot has no recorded TSval
-            buf->records[i].timestamp + TIMEOUT_TSVAL_NS < time // This spot has an old/stale recorded TSval
+            buf->timestamps[i] == 0 || // This spot has no recorded TSval
+            buf->timestamps[i] + TIMEOUT_TSVAL_NS < time // This spot has an old/stale recorded TSval
         ) {
-          buf->records[i].timestamp = time;
-          buf->records[i].tsval = tsval;
-          return 0;
+            buf->timestamps[i] = time;
+            buf->tsvals[i] = tsval;
+            return 0;
         }
     }
 
@@ -313,18 +316,19 @@ static __always_inline __u64 match_and_clear_recorded_tsval(
     __u64 match_at_time = 0;
     int i;
 
-    for (i = 0; i < ARRAY_SIZE(buf->records); i++) {
-        if (buf->records[i].timestamp == 0)
+    for (i = 0; i < ARRAY_SIZE(buf->timestamps); i++) {
+        if (buf->timestamps[i] == 0)
+            // Empty entry
             continue;
 
-        if (buf->records[i].tsval == tsval) {
+        if (buf->tsvals[i] == tsval) {
             // Match - return time of match and clear out entry
-            match_at_time = buf->records[i].timestamp;
-            buf->records[i].timestamp = 0;
+            match_at_time = buf->timestamps[i];
+            buf->timestamps[i] = 0;
 	    // No early return to let is also clear out old entries
-        } else if (u32wrap_lt(buf->records[i].tsval, tsval)) {
+        } else if (u32wrap_lt(buf->tsvals[i], tsval)) {
             // Old TSval which we've already passed - clear out
-            buf->records[i].timestamp = 0;
+            buf->timestamps[i] = 0;
         }
     }
 

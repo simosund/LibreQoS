@@ -279,16 +279,30 @@ static __always_inline void infer_tcp_rtt(
     if (dissector->tsval == 0)
         return;
 
-    //bpf_debug("[FLOWS][%d] TSVAL: %u, TSECR: %u", direction, tsval, tsecr);
-    // This part is a bit odd - TSval and TSecr may be updated independently, so no need to couple them
-    // Should also check that they advance (rather than just not being the same)
-    if (dissector->tsval != data->tsval[rate_index] && dissector->tsecr != data->tsecr[rate_index]) {
+    // Update TSval in forward (rate_index) direction
+    if (
+        data->tsval[rate_index] == 0 || // No previous TSval
+        u32wrap_lt(data->tsval[rate_index], dissector->tsval) // New TSval
+    ) {
+        // Constantly updated - may always miss match if update more frequently than RTT
+        data->tsval[rate_index] = dissector->tsval;
+        data->ts_change_time[rate_index] = dissector->now;
         n_tsval_changes++;
+    }
+
+    if (dissector->tsecr == 0)
+        return;
+
+    // Update TSecr in forward direction + check match in reverse (other_rate_index) direction
+    if (
+        data->tsecr[rate_index] == 0 || // No previous TSecr
+        u32wrap_lt(data->tsecr[rate_index], dissector->tsecr) // New TSecr
+    ) {
+        data->tsecr[rate_index] = dissector->tsecr;
         n_tsecr_changes++;
 
-        // Match check
+        // Match TSecr against previous TSval in reverse direction
         if (dissector->tsecr == data->tsval[other_rate_index]) {
-            // This becomes a bit strange as change_time is time of changing both TSval and TSecr
             __u64 elapsed = dissector->now - data->ts_change_time[other_rate_index];
             n_rtts++;
             // Sanity checks - in my netem setup external/internet segment has 42ms latency and local segment has 9ms
@@ -305,12 +319,8 @@ static __always_inline void infer_tcp_rtt(
                 bpf_ringbuf_output(&flowbee_events, &event, sizeof(event), 0);
             }
         }
-
-        // Constantly updated - may always miss match if update more frequently than RTT
-        data->ts_change_time[rate_index] = dissector->now;
-        data->tsval[rate_index] = dissector->tsval;
-        data->tsecr[rate_index] = dissector->tsecr;
     }
+
     return;
 }
 

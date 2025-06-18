@@ -9,7 +9,6 @@
 
 
 #define SECOND_IN_NANOS 1000000000ULL
-#define TWO_SECONDS_IN_NANOS 2000000000
 #define MS_IN_NANOS_T10 10000
 #define HALF_MBPS_IN_BYTES_PER_SECOND 62500
 #define RTT_RING_SIZE 4
@@ -408,14 +407,12 @@ static __always_inline void infer_tcp_rtt(
                 bpf_printk("RTT too low! dir=%u, tsecr/matched tsval=%u, rtt=%llu",
                            rate_index, dissector->tsecr, elapsed);
 
-            if (elapsed < TWO_SECONDS_IN_NANOS) {
-                n_reported_rtts++;
-                struct flowbee_event event = { 0 };
-                event.key = *key;
-                event.round_trip_time = elapsed;
-                event.effective_direction = other_rate_index; // direction of the origial TCP segment we matched against
-                bpf_ringbuf_output(&flowbee_events, &event, sizeof(event), 0);
-            }
+            n_reported_rtts++;
+            struct flowbee_event event = { 0 };
+            event.key = *key;
+            event.round_trip_time = elapsed;
+            event.effective_direction = other_rate_index; // direction of the origial TCP segment we matched against
+            bpf_ringbuf_output(&flowbee_events, &event, sizeof(event), 0);
         }
     }
 

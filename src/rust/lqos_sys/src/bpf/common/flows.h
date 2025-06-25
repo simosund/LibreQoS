@@ -281,23 +281,6 @@ static __always_inline void detect_retries(
     data->last_ack[rate_index] = ack_seq;
 }
 
-static __always_inline int get_tcp_segment_size(
-    struct dissector_t *dissector
-) {
-    struct tcphdr *tcph;
-    char *payload_start;
-
-    tcph = get_tcp_header(dissector);
-    if (!tcph || tcph + 1 > dissector->end)
-        return -1;
-
-    payload_start = (char *)tcph + tcph->doff * 4;
-    if (payload_start < (char *)(tcph + 1) || payload_start > dissector->end)
-        return -1;
-
-    return (char *)dissector->end - payload_start;
-}
-
 // Add a TSval <-> timestamp mapping to buf.
 // Will overwrite outdated (timed out) entries.
 // Will return 0 on success, or -1 if there was no free slot in buf.
@@ -379,7 +362,7 @@ static __always_inline void infer_tcp_rtt(
         data->tsval[rate_index] = dissector->tsval;
 
         // Only attempt to track TSval if it's not a pure ACK
-        if (get_tcp_segment_size(dissector) > 0 || BITCHECK(DIS_TCP_SYN))
+        if (dissector->tcp_segment_size > 0 || BITCHECK(DIS_TCP_SYN))
             record_tsval(&data->tsval_tstamps[rate_index], dissector->now,
                          dissector->tsval);
     }

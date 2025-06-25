@@ -49,6 +49,7 @@ struct dissector_t
     __u16 dst_port;
     __u8 tos;
     __u8 tcp_flags;
+    __u16 tcp_segment_size;
     __u16 window;
     __u32 tsval;
     __u32 tsecr;
@@ -361,6 +362,9 @@ static __always_inline void snoop(struct dissector_t *dissector)
             dissector->window = hdr->window;
             dissector->sequence = hdr->seq;
             dissector->ack_seq = hdr->ack_seq;
+            void *payload_start = (void *)hdr + hdr->doff * 4;
+            dissector->tcp_segment_size = payload_start < dissector->end ?
+                dissector->end - payload_start : 0;
 
             parse_tcp_ts(hdr, dissector->end, &dissector->tsval, &dissector->tsecr);
         }

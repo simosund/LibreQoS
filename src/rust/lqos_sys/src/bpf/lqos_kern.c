@@ -100,7 +100,7 @@ int xdp_prog(struct xdp_md *ctx)
         }
     }
 
-    struct dissector_t dissector = {0};
+    struct dissector_t *dissector = NULL;
 #ifdef VERBOSE
     bpf_debug("(XDP) START XDP");
     bpf_debug("(XDP) Running mode %u", direction);
@@ -108,16 +108,16 @@ int xdp_prog(struct xdp_md *ctx)
 #endif
     // If the dissector is unable to figure out what's going on, bail
     // out. This specifically permits non-IP packets to pass unmolested.
-    if (!dissector_new(ctx, &dissector)) return XDP_PASS;
+    if (!dissector_new(ctx, &dissector) || !dissector) return XDP_PASS;
 
     // Note that this step rewrites the VLAN tag if redirection
     // is requested.
-    if (!dissector_find_l3_offset(&dissector, vlan_redirect)) return XDP_PASS;
-    if (!dissector_find_ip_header(&dissector)) return XDP_PASS;
+    if (!dissector_find_l3_offset(dissector, vlan_redirect)) return XDP_PASS;
+    if (!dissector_find_ip_header(dissector)) return XDP_PASS;
     u_int8_t effective_direction = determine_effective_direction(
         direction, 
         internet_vlan, 
-        &dissector
+        dissector
     );
 
 #ifdef VERBOSE
@@ -133,7 +133,7 @@ int xdp_prog(struct xdp_md *ctx)
     struct ip_hash_info * ip_info = setup_lookup_key_and_tc_cpu(
         effective_direction, 
         &lookup_key, 
-        &dissector
+        dissector
     );
 
     // Find the desired TC handle and CPU target
@@ -145,7 +145,7 @@ int xdp_prog(struct xdp_md *ctx)
     }
 
     // Per-Flow RTT Tracking
-    track_flows(&dissector, effective_direction);
+    track_flows(dissector, effective_direction);
 
     // Update the traffic tracking buffers
     track_traffic(
@@ -153,18 +153,18 @@ int xdp_prog(struct xdp_md *ctx)
         &lookup_key.address, 
         ctx->data_end - ctx->data, // end - data = length
         tc_handle,
-        &dissector
+        dissector
     );
 
     // Send on its way
     if (tc_handle != 0) {
         // Send data to Heimdall
         __u8 heimdall_mode = get_heimdall_mode();
-        if (heimdall_mode > 0 && is_heimdall_watching(&dissector, effective_direction)) {
+        if (heimdall_mode > 0 && is_heimdall_watching(dissector, effective_direction)) {
 #ifdef VERBOSE
             bpf_debug("(XDP) Storing Heimdall Data");
 #endif            
-            update_heimdall(&dissector, ctx->data_end - ctx->data, heimdall_mode);
+            update_heimdall(dissector, ctx->data_end - ctx->data, heimdall_mode);
         }
 
         // Handle CPU redirection if there is one specified

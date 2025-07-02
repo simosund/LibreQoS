@@ -95,6 +95,13 @@ struct mpls_label
 #define MPLS_LS_TTL_MASK 0x000000FF
 #define MPLS_LS_TTL_SHIFT 0
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, struct dissector_t);
+    __uint(max_entries, 1);
+} dissector_scratch SEC(".maps");
+
 // Constructor for a dissector
 // Connects XDP/TC SKB structure to a dissector structure.
 // Arguments:
@@ -104,13 +111,24 @@ struct mpls_label
 // Returns TRUE if all is good, FALSE if the process cannot be completed
 static __always_inline bool dissector_new(
     struct xdp_md *ctx,
-    struct dissector_t *dissector)
+    struct dissector_t **dissector_out)
 {
+    struct dissector_t *dissector;
+    __u32 key = 0;
+
+    *dissector_out = NULL;
+
+    dissector = bpf_map_lookup_elem(&dissector_scratch, &key);
+    if (!dissector) // Should never happen, only to please the verifier
+        return false;
+
     dissector->ctx = ctx;
     dissector->start = (void *)(long)ctx->data;
     dissector->end = (void *)(long)ctx->data_end;
     dissector->ethernet_header = (struct ethhdr *)NULL;
     dissector->l3offset = 0;
+    dissector->ip_header.iph = NULL;
+    // Does not clear the {src,dst}_ip, but those should never be used unless ipprotocol is set
     dissector->skb_len = dissector->end - dissector->start;
     dissector->current_vlan = 0;
     dissector->ip_protocol = 0;
@@ -118,6 +136,9 @@ static __always_inline bool dissector_new(
     dissector->dst_port = 0;
     dissector->tos = 0;
     dissector->sequence = 0;
+    dissector->tsval = 0;
+    dissector->tsecr = 0;
+    dissector->window = 0;
     dissector->now = bpf_ktime_get_boot_ns();
 
     // Check that there's room for an ethernet header
@@ -125,7 +146,9 @@ static __always_inline bool dissector_new(
     {
         return false;
     }
+
     dissector->ethernet_header = (struct ethhdr *)dissector->start;
+    *dissector_out = dissector;
 
     return true;
 }
@@ -142,11 +165,12 @@ static __always_inline bool dissector_find_l3_offset(
     struct dissector_t *dissector,
     bool vlan_redirect)
 {
-    if (dissector->ethernet_header == NULL)
+    if (dissector == NULL || dissector->ethernet_header == NULL)
     {
         bpf_debug("Ethernet header is NULL, still called offset check.");
         return false;
     }
+
     __u32 offset = sizeof(struct ethhdr);
     __u16 eth_type = bpf_ntohs(dissector->ethernet_header->h_proto);
 

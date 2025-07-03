@@ -357,6 +357,9 @@ static __always_inline __u64 match_and_clear_recorded_tsval(
     return match_at_time;
 }
 
+volatile __u64 rtt_matched = 0;
+volatile __u64 rtt_reported = 0;
+
 // Passively infer TCP RTT by matching ACKs to previous TCP segments using TCP
 // timestamps (TSval/TSecr).
 // Stores previous TSval value and checks if TSecr of current packet matches a
@@ -404,8 +407,24 @@ static __always_inline void infer_tcp_rtt(
             &data->tsval_tstamps[other_rate_index], dissector->tsecr);
         if (match_at > 0) {
             __u64 elapsed = dissector->now - match_at;
+            rtt_matched++;
+
+	    if (rate_index == 0) {
+                // External RTT outside expected range
+                if (elapsed < 41900000)
+                    bpf_printk("[%d]: RTT too low! rtt=%llu ns", rate_index, elapsed);
+                else if (elapsed > 60000000)
+                    bpf_printk("[%d]: RTT suspiciously high! rtt=%llu ns", rate_index, elapsed);
+            } else {
+                // Local RTT outside expected range
+                if (elapsed < 8900000)
+                    bpf_printk("[%d]: RTT too low! rtt=%llu ns", rate_index, elapsed);
+                else if (elapsed > 30000000)
+                    bpf_printk("[%d]: RTT suspiciously high! rtt=%llu ns", rate_index, elapsed);
+            }
 
             if (data->last_rtt[other_rate_index] + MIN_RTT_SAMPLE_INTERVAL < dissector->now) {
+                rtt_reported++;
                 struct flowbee_event event = {0};
                 event.key = *key;
                 event.round_trip_time = elapsed;

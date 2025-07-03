@@ -258,6 +258,9 @@ static __always_inline void detect_retries(
     data->last_sequence[rate_index] = sequence;
 }
 
+volatile __u64 rtt_matched = 0;
+volatile __u64 rtt_reported = 0;
+
 // Handle Per-Flow TCP Analysis
 static __always_inline void process_tcp(
     struct dissector_t *dissector,
@@ -312,7 +315,24 @@ static __always_inline void process_tcp(
                 data->rate_estimate_bps[other_rate_index] > 0 )
             ) {
                 __u64 elapsed = dissector->now - data->ts_change_time[other_rate_index];
+		rtt_matched++;
+
+                if (rate_index == 0) {
+                    // External RTT outside expected range
+                    if (elapsed < 41900000)
+                        bpf_printk("[%d]: RTT too low! rtt=%llu ns", rate_index, elapsed);
+                    else if (elapsed > 60000000)
+                        bpf_printk("[%d]: RTT suspiciously high! rtt=%llu ns", rate_index, elapsed);
+                } else {
+                    // Local RTT outside expected range
+                    if (elapsed < 8900000)
+                        bpf_printk("[%d]: RTT too low! rtt=%llu ns", rate_index, elapsed);
+                    else if (elapsed > 30000000)
+                        bpf_printk("[%d]: RTT suspiciously high! rtt=%llu ns", rate_index, elapsed);
+                }
+
                 if (elapsed < TWO_SECONDS_IN_NANOS) {
+                    rtt_reported++;
                     struct flowbee_event event = { 0 };
                     event.key = key;
                     event.round_trip_time = elapsed;
